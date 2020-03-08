@@ -9,6 +9,8 @@ import shutil
 import subprocess
 import sys
 import time
+from PIL import Image
+from PIL import GifImagePlugin
 
 #----------
 # Argparse
@@ -64,34 +66,71 @@ args = parser.parse_args()
 # Main
 #
 
-try:
-    container = av.open(args.input)
-except av.AVError:
-    print("error: %s is not a valid video file" % args.input)
-    sys.exit(2)
+if (args.input).endswith('.mp4'):
+    try:    
+        container = av.open(args.input)
+    except av.AVError:
+        print("error: %s is not a valid video file" % args.input)
+        sys.exit(2)
+        
+    videoStream = container.streams.video[0]
+    fps = int(videoStream.average_rate)
+    numDigits = len(str(videoStream.frames))
+    
+        
+    print("\nInfo: %dx%d @ %dfps (%d frames)" % (videoStream.width, videoStream.height, fps, videoStream.frames))
+    
+    
+    if args.extract:
 
-videoStream = container.streams.video[0]
-fps = int(videoStream.average_rate)
-numDigits = len(str(videoStream.frames))
+        print("\nExtrating frames from video...")
 
-print("\nInfo: %dx%d @ %dfps (%d frames)" % (videoStream.width, videoStream.height, fps, videoStream.frames))
-
-if args.extract:
-
-    print("\nExtrating frames from video...")
-
+        try:
+            os.makedirs("tmp")
+        except FileExistsError:
+            shutil.rmtree("tmp")
+            os.makedirs("tmp")
+        
+        bar = progressbar.ProgressBar(max_value=videoStream.frames, redirect_stdout=True)
+        
+        for packet in bar(container.demux()):
+            for frame in packet.decode():
+                if type(frame) == av.video.frame.VideoFrame:
+                    frame.to_image().save(("tmp/%%0%dd.png" % numDigits) % frame.index)
+elif (args.input).endswith('.gif'):
     try:
-        os.makedirs("tmp")
-    except FileExistsError:
-        shutil.rmtree("tmp")
-        os.makedirs("tmp")
+        container1 = Image.open(args.input)
+    except Image.IMAGEError:
+        print("error: %s is not a valid GIF file" % args.input)
+        sys.exit(2)
+        
+    print(container1.n_frames)
+    print(container1.size)
+    
+    def extractFrames(inGif, outFolder):
+        frame = Image.open(inGif)
+        nframes = 0
+        while frame:
+            frame.save( '%s/%s-%s.png' % (outFolder, os.path.basename(inGif), nframes ) , 'GIF')
+            nframes += 1
+            try:
+                frame.seek( nframes )
+            except EOFError:
+                break;
+        return True
+    
+    if args.extract:
 
-    bar = progressbar.ProgressBar(max_value=videoStream.frames, redirect_stdout=True)
-    for packet in bar(container.demux()):
-        for frame in packet.decode():
-            if type(frame) == av.video.frame.VideoFrame:
-                frame.to_image().save(("tmp/%%0%dd.png" % numDigits) % frame.index)
+        print("\nExtrating frames from GIF...")
 
+        try:
+            os.makedirs("tmp")
+        except FileExistsError:
+            shutil.rmtree("tmp")
+            os.makedirs("tmp")
+        
+        extractFrames(args.input, 'tmp')
+        
 partConfig = {}
 
 if args.config:
@@ -143,13 +182,21 @@ if args.config:
         clock = input(" (optional) the y-coordinate at which to draw the current time (for watches): ")
 
         partConfig[partName] = [type, count, pause, path, rgbHex, clock]
-
-    print("\nWriting desc.txt...")
-    descTxt = open("desc.txt", "w")
-    descTxt.write("%d %d %d\n" % (videoStream.width, videoStream.height, fps))
-    for part in partConfig.values():
-        descTxt.write(("%s %d %d %s %s %s" % tuple(part)).strip() + "\n")
-    descTxt.close()
+    if (args.input).endswith('.mp4'):
+        print("\nWriting desc.txt...")
+        descTxt = open("desc.txt", "w")
+        descTxt.write("%d %d %d\n" % (videoStream.width, videoStream.height, fps))
+        for part in partConfig.values():
+            descTxt.write(("%s %d %d %s %s %s" % tuple(part)).strip() + "\n")
+        descTxt.close()
+    elif (args.input).endswith('.gif'):
+        gifsize = container1.size
+        print("\nWriting desc.txt...")
+        descTxt = open("desc.txt", "w")
+        descTxt.write("%d %d %d\n" % (gifsize, "30"))
+        for part in partConfig.values():
+            descTxt.write(("%s %d %d %s %s %s" % tuple(part)).strip() + "\n")
+        descTxt.close()
 
 else:
     print("\nReading desc.txt...")
